@@ -3,6 +3,8 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 import numpy as np
 
+from sklearn.linear_model import LinearRegression
+
 filename_energy = 'energy_use_per_person.csv'
 energy = pd.read_csv(filename_energy, header = 0, index_col = 0)
 energy.drop(columns = '2015', axis = 1, inplace = True)
@@ -16,29 +18,72 @@ co2 = co2.reset_index().transpose()
 co2.columns = co2.iloc[0]
 co2 = co2[1:-1]
 
-print(co2.index)
-print(energy.index)
+slopes = []
+r_val = []
 
 # Plotting
-for year in range(1960, 2013):
+timerange = range(1960, 2013)
+for year in timerange:
     year = str(year)
     x_values = energy.loc[year,:]
     x_values.dropna(inplace = True)
+    # Adjust the x-scale to have similar x and y-scales and a slope close to 1
+    x_values = x_values/1000
     y_values = co2.loc[year, :]
     y_values.dropna(inplace = True)
+    # Filter series and keep only values with the same index
+    for index in x_values.index:
+        if index not in y_values.index:
+            x_values.drop(index=index, inplace=True)
+    for index in y_values.index:
+        if index not in x_values.index:
+            y_values.drop(index=index, inplace=True)
 
-    plt.figure()
-    scatter = sns.scatterplot(x_values, y_values, palette = 'deep')
-    scatter.set(xlabel='Energy consumption per person [kWh/person]', ylabel='CO_2 emissions per person [t/person]')
-    scatter.set_title('Energy consumption vs CO_2 emsissions ' + str(year))
-
+    # Creating a plot of each year: energy use per capita vs co2 emissions per capita
+    fig = plt.figure(0)
+    # Using lists as input, because the dataframe or pandas series do not work for some reason
+    reg = sns.regplot(x = list(x_values), y = list(y_values))
+    reg.set(xlabel='Energy consumption per person [MWh/person]', ylabel='CO2 emissions per person [t/person]')
+    reg.set_title(str(year))
+    reg.axis([0, 250, 0, 100])
     # Automatic annotation of interesting countries
     y_distance = 1
     countries_of_interest = ['Germany', 'Iceland', 'Qatar', 'Trinidad and Tobago']
     for country in countries_of_interest:
         try:
-            scatter.text(x_values[country], y_values[country] - y_distance, country, horizontalalignment='center', size='small', color='black', weight='normal')
+            reg.text(x_values[country], y_values[country] - y_distance, country, horizontalalignment='center', size='small', color='black', weight='normal')
         except:
             continue
 
-    plt.savefig('plots/energy_use_per_person_vs_co2/energy_use_per_person_vs_co2_' + year + '.png', dpi = 300)
+    # Finding the slope via RegressionModel
+    print('Creating LinearRegressionModel for ' + year + ' ...')
+    x_values = np.array(x_values).reshape(-1, 1)
+    y_values = np.array(y_values).reshape(-1, 1)
+    lr = LinearRegression()
+    lr.fit(x_values, y_values)
+    # Recieving the specific values of the linear function: slope, y-intercept and mean squarred error
+    intercept = lr.intercept_[0]
+    slope = lr.coef_[0][0]
+    r_sq = lr.score(x_values, y_values)
+    equation = "slope : " + str(round(slope,3)) + "\nconfidence : " + str(round(r_sq, 3))
+    # Adding the equation of the function to the plot
+    reg.text(5, 90, equation, horizontalalignment = 'left', size='medium', color='black', weight='normal')
+    # Saving the slope and the MSE for later use
+    slopes.append(slope)
+    r_val.append(r_sq)
+    # Save the figure as a .png
+    print('Saving plot of ' + year + '.')
+    fig.savefig('plots/energy_use_per_person_vs_co2/energy_use_per_person_vs_co2_' + year + '.png', dpi = 300)
+    # Closing the plot to make sure the screen gets not flooded with 53 windows
+    plt.close(0)
+
+# Creating a new figure for all determined slope values of the LinearRegression
+fig_2 = plt.figure()
+lineplot = sns.lineplot(x = timerange, y = slopes)
+lineplot.set(xlabel='t [y]', ylabel='CO2 emissions per MWh [t/MWh]')
+lineplot.set_title("CO2 emissions per MWh correlation of all countries")
+fig_2.savefig('plots/co2_emitted_per_MWh_since_1960.png', dpi = 300)
+
+# Saving the new data as .csv
+export = pd.DataFrame({'year': timerange, 't_co2 per MWh world': slopes})
+export.to_csv('t_co2_per_MWh_world.csv')
